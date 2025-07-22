@@ -1,0 +1,16 @@
+[
+  {
+    "strategy_id": "spy_5min_v1",
+    "signal": "sell",
+    "ticker": "SPY",
+    "price": 432.1,
+    "timestamp": "2025-07-22T04:25:47.869406"
+  },
+  {
+    "strategy_id": "spy_5min_v1",
+    "signal": "sell",
+    "ticker": "SPY",
+    "price": 432.1,
+    "timestamp": "2025-07-22T04:27:29.481852"
+  }
+]

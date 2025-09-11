@@ -52,48 +52,43 @@ def dashboard():
 # Webhook endpoint
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.get_json()
-
-    if not data:
-        return jsonify({'error': 'Invalid or missing JSON'}), 400
-
-    # Validate required fields
-    missing = REQUIRED_FIELDS - data.keys()
-    if missing:
-        return jsonify({'error': f'Missing required fields: {", ".join(missing)}'}), 400
-
-    # Validate signal
-    if data['signal'].lower() not in VALID_SIGNALS:
-        return jsonify({'error': 'Invalid signal value (must be "buy" or "sell")'}), 400
-
-    # Validate price
     try:
-        data['price'] = float(data['price'])
-    except (ValueError, TypeError):
-        return jsonify({'error': 'Invalid price (must be a float)'}), 400
+        data = request.get_json()
 
-    # Add timestamp
-    data['timestamp'] = datetime.utcnow().isoformat()
+        # ✅ Basic validation
+        required_fields = ["strategy_id", "signal", "ticker", "price"]
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"status": "error", "message": f"Missing field: {field}"}), 400
 
-    # Execute trade via Alpaca
-    alpaca_result = place_order(
-        symbol=data['ticker'],
-        side=data['signal'],
-        qty=1,
-        use_paper=USE_PAPER
-    )
-    data['alpaca_status'] = alpaca_result
+        signal = {
+            "strategy_id": data["strategy_id"],
+            "signal": data["signal"].lower(),
+            "ticker": data["ticker"].upper(),
+            "price": float(data["price"]),
+            "timestamp": datetime.utcnow().isoformat(),
+            "alpaca_status": {}  # placeholder, updated after trade attempt
+        }
 
-    # Save to memory
-    recent_signals.append(data)
-    recent_signals[:] = recent_signals[-50:]
+        # Add to in-memory log
+        recent_signals.append(signal)
 
-    # Save to file
-    with open(SIGNAL_LOG_FILE, 'w') as f:
-        json.dump(recent_signals, f, indent=2)
+        # ✅ Save immediately to disk
+        try:
+            with open("signal_log.json", "w") as f:
+                json.dump(recent_signals, f, indent=2)
+        except Exception as e:
+            app.logger.error(f"Error writing signal_log.json: {e}")
 
-    print("✅ Webhook received and processed:", data)
-    return jsonify({'status': 'received'}), 200
+        # Place order (optional)
+        # result = place_order(signal["ticker"], signal["signal"], 1, use_paper=USE_PAPER)
+        # signal["alpaca_status"] = result
+
+        return jsonify({"status": "success", "signal": signal}), 200
+
+    except Exception as e:
+        app.logger.error(f"Webhook error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 # Alpaca trading logic
@@ -162,7 +157,6 @@ def place_order(symbol, side, qty=1, use_paper=True):
     except Exception as e:
         log_trade_error(symbol, side, e)
         return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
-
 
 
 # Optional: Error logging

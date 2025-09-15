@@ -176,20 +176,35 @@
                         <th>Signal</th>
                         <th>Price</th>
                         <th>Status</th>
-                        <th>Message</th>
+                        <th>Message / Details</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for signal in signals %}
+                    {% for signal in signals|reverse %}  {# newest first #}
                         {% set status = signal.get('alpaca_status', {}).get('status', 'unknown') %}
-                        <tr class="{{ status }}">
-                            <td>{{ signal.timestamp }}</td>
-                            <td>{{ signal.strategy_id }}</td>
-                            <td>{{ signal.ticker }}</td>
-                            <td>{{ signal.signal }}</td>
-                            <td>{{ signal.price }}</td>
+                        <tr
+                          class="
+                            {% if status == 'success' %}table-success{% endif %}
+                            {% if status == 'failed' or status == 'error' %}table-danger{% endif %}
+                            {% if status == 'skipped' %}table-warning{% endif %}
+                          ">
+                            <td>{{ signal.timestamp|prettytime }}</td>
+                            <td>{{ signal.strategy_id or 'manual' }}</td>
+                            <td>{{ signal.symbol or signal.ticker or '--' }}</td>
+                            <td>{{ signal.side or signal.signal or '--' }}</td>
+                            <td>{{ signal.price or '--' }}</td>
                             <td>{{ status }}</td>
-                            <td>{{ signal.get('alpaca_status', {}).get('message', 'N/A') }}</td>
+                            <td>
+                                {{ signal.get('alpaca_status', {}).get('message', 'N/A') }}
+                                {% if signal.get('alpaca_status', {}).get('raw') %}
+                                    <details>
+                                        <summary class="text-primary" style="cursor: pointer;">Details</summary>
+                                        <pre class="bg-light p-2 border rounded small" style="max-height: 200px; overflow-y: auto;">
+                                            {{ signal.get('alpaca_status', {}).get('raw') | tojson(indent=2) }}
+                                        </pre>
+                                    </details>
+                                {% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>

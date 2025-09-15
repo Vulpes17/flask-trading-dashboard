@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from dotenv import load_dotenv
 import alpaca_trade_api as tradeapi
@@ -41,6 +42,21 @@ try:
 except (FileNotFoundError, json.JSONDecodeError):
     recent_signals = []
     print("📂 No signal log found — starting fresh.")
+
+
+@app.template_filter('prettytime')
+def prettytime_filter(value):
+    try:
+        # Parse ISO timestamp from logs
+        dt = datetime.fromisoformat(value.replace("Z", ""))
+
+        # Convert UTC → Local
+        dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt_local = dt_utc.astimezone(ZoneInfo("US/Central"))  # change this to your timezone
+
+        return dt_local.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return value  # fallback if parsing fails
 
 
 @app.route('/dashboard')
@@ -97,33 +113,43 @@ def manual_trade():
     qty = int(request.form.get("qty", 1))
     side = request.form.get("side", "buy")
 
-    # Call your existing place_order() function
     try:
-        order_response = place_order(symbol, qty, side)
-
-        # Build a log entry
-        log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "source": "manual",
-            "symbol": symbol,
-            "qty": qty,
-            "side": side,
-            "order_id": order_response.get("id", "N/A"),
-        }
-
-        # Append to signal_log.json
-        with open("signal_log.json", "r+") as f:
-            data = json.load(f)
-            data.append(log_entry)
-            f.seek(0)
-            json.dump(data, f, indent=2)
-
-        print(f"✅ Manual trade logged: {log_entry}")
+        order_response = place_order(symbol, side, qty) or {}
+        order_id = order_response.get("id", "N/A")
+        status = order_response.get("status", "unknown")
+        message = order_response.get("message", "N/A")
 
     except Exception as e:
+        order_response = {}
+        order_id = "ERROR"
+        status = "failed"
+        message = str(e)
         print(f"❌ Error placing manual trade: {e}")
 
-    # Redirect back to dashboard so the Log tab reloads
+    # Build a log entry
+    log_entry = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "source": "manual",
+        "symbol": symbol,
+        "qty": qty,
+        "side": side,
+        "order_id": order_id,
+        "alpaca_status": {
+            "status": status,
+            "message": message,
+            "raw": order_response  # 🔥 full Alpaca response for debugging
+        },
+    }
+
+    # Append to signal_log.json
+    with open("signal_log.json", "r+") as f:
+        data = json.load(f)
+        data.append(log_entry)
+        f.seek(0)
+        json.dump(data, f, indent=2)
+
+    print(f"✅ Manual trade logged: {log_entry}")
+
     return redirect(url_for("dashboard"))
 
 
@@ -137,18 +163,19 @@ def place_order(symbol, side, qty=1, use_paper=True):
             api_version='v2'
         )
 
-        # 🕒 Skip market clock check for crypto (24/7 trading)
-        is_crypto = '/' in symbol
+        # ✅ Detect crypto properly (no market hours for crypto)
+        is_crypto = symbol.endswith("USD") and len(symbol) > 3
 
         if not is_crypto:
             clock = api.get_clock()
             if not clock.is_open:
                 return {'status': 'error', 'message': 'Market is closed'}
 
-        # ✅ Buying power check
-        account = api.get_account()
-        if float(account.buying_power) < 5:
-            return {'status': 'error', 'message': 'Insufficient buying power'}
+        # ✅ Buying power check (skip for crypto, since buying_power doesn’t apply the same way)
+        if not is_crypto:
+            account = api.get_account()
+            if float(account.buying_power) < 5:
+                return {'status': 'error', 'message': 'Insufficient buying power'}
 
         # ✅ Get all open positions
         positions = api.list_positions()
@@ -184,7 +211,8 @@ def place_order(symbol, side, qty=1, use_paper=True):
         )
 
         print(f"✅ Alpaca order placed: {side.upper()} {qty} {symbol}")
-        return {'status': 'success', 'order_id': order.id}
+        # Return Alpaca's full raw response (dict-like)
+        return order._raw
 
     except tradeapi.rest.APIError as e:
         log_trade_error(symbol, side, e)

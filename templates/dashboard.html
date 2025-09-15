@@ -100,25 +100,53 @@
                         <td>Buy ETH/USD</td>
                         <td>ETH/USD</td>
                         <td>1</td>
-                        <td><button class="btn btn-success btn-sm">BUY</button></td>
+                        <td>
+                            <form action="/manual_trade" method="POST" style="display:inline;">
+                                <input type="hidden" name="symbol" value="ETH/USD">
+                                <input type="hidden" name="qty" value="1">
+                                <input type="hidden" name="side" value="buy">
+                                <button type="submit" class="btn btn-success btn-sm">BUY</button>
+                            </form>
+                        </td>
                     </tr>
                     <tr>
                         <td>Sell ETH/USD</td>
                         <td>ETH/USD</td>
                         <td>1</td>
-                        <td><button class="btn btn-danger btn-sm">SELL</button></td>
+                        <td>
+                            <form action="/manual_trade" method="POST" style="display:inline;">
+                                <input type="hidden" name="symbol" value="ETH/USD">
+                                <input type="hidden" name="qty" value="1">
+                                <input type="hidden" name="side" value="sell">
+                                <button type="submit" class="btn btn-danger btn-sm">SELL</button>
+                            </form>
+                        </td>
                     </tr>
                     <tr>
                         <td>Buy SPY</td>
                         <td>SPY</td>
                         <td>1</td>
-                        <td><button class="btn btn-success btn-sm">BUY</button></td>
+                        <td>
+                            <form action="/manual_trade" method="POST" style="display:inline;">
+                                <input type="hidden" name="symbol" value="SPY">
+                                <input type="hidden" name="qty" value="1">
+                                <input type="hidden" name="side" value="buy">
+                                <button type="submit" class="btn btn-success btn-sm">BUY</button>
+                            </form>
+                        </td>
                     </tr>
                     <tr>
                         <td>Sell SPY</td>
                         <td>SPY</td>
                         <td>1</td>
-                        <td><button class="btn btn-danger btn-sm">SELL</button></td>
+                        <td>
+                            <form action="/manual_trade" method="POST" style="display:inline;">
+                                <input type="hidden" name="symbol" value="SPY">
+                                <input type="hidden" name="qty" value="1">
+                                <input type="hidden" name="side" value="sell">
+                                <button type="submit" class="btn btn-danger btn-sm">SELL</button>
+                            </form>
+                        </td>
                     </tr>
                 </tbody>
             </table>

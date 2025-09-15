@@ -1,10 +1,10 @@
 import os
 import json
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 from dotenv import load_dotenv
 import alpaca_trade_api as tradeapi
-from flask import render_template
+# from flask import render_template
 
 # Load environment variables from .env
 load_dotenv()
@@ -91,6 +91,42 @@ def webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route("/manual_trade", methods=["POST"])
+def manual_trade():
+    symbol = request.form.get("symbol")
+    qty = int(request.form.get("qty", 1))
+    side = request.form.get("side", "buy")
+
+    # Call your existing place_order() function
+    try:
+        order_response = place_order(symbol, qty, side)
+
+        # Build a log entry
+        log_entry = {
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "source": "manual",
+            "symbol": symbol,
+            "qty": qty,
+            "side": side,
+            "order_id": order_response.get("id", "N/A"),
+        }
+
+        # Append to signal_log.json
+        with open("signal_log.json", "r+") as f:
+            data = json.load(f)
+            data.append(log_entry)
+            f.seek(0)
+            json.dump(data, f, indent=2)
+
+        print(f"✅ Manual trade logged: {log_entry}")
+
+    except Exception as e:
+        print(f"❌ Error placing manual trade: {e}")
+
+    # Redirect back to dashboard so the Log tab reloads
+    return redirect(url_for("dashboard"))
+
+
 # Alpaca trading logic
 def place_order(symbol, side, qty=1, use_paper=True):
     try:
@@ -173,5 +209,6 @@ def home():
 
 
 # Run the app
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=5000)

@@ -103,7 +103,7 @@ def manual_trade():
 
         # Build a log entry
         log_entry = {
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.utcnow().isoformat(),
             "source": "manual",
             "symbol": symbol,
             "qty": qty,

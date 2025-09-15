@@ -22,3 +22,6 @@ signal_log.json
 # OS-specific junk
 .DS_Store
 Thumbs.db
+
+# Cheat Sheet
+cheat_sheet.txt

@@ -78,7 +78,7 @@ def dashboard():
     # newest first
     signals = list(reversed(signals))
 
-    return render_template("dashboard.html", signals=signals)
+    return render_template("dashboard.html", signals=signals, market_status=market_status)
 
 
 # Webhook endpoint

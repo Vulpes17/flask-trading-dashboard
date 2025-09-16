@@ -61,10 +61,13 @@ def prettytime_filter(value):
 
 @app.route("/dashboard")
 def dashboard():
-    with open("signal_log.json", "r") as f:
-        signals = json.load(f)
+    try:
+        with open("signal_log.json", "r") as f:
+            signals = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        signals = []
 
-    # Show newest first
+    # newest first
     signals = list(reversed(signals))
 
     return render_template("dashboard.html", signals=signals)
@@ -176,6 +179,11 @@ def manual_trade():
 
 
 # Alpaca trading logic
+def normalize_symbol(symbol: str) -> str:
+    """Normalize symbols so ETH/USD == ETHUSD"""
+    return symbol.replace("/", "").upper()
+
+
 def place_order(symbol, side, qty=1, use_paper=True):
     try:
         api = tradeapi.REST(
@@ -185,64 +193,62 @@ def place_order(symbol, side, qty=1, use_paper=True):
             api_version='v2'
         )
 
-        # ✅ Detect crypto properly (no market hours for crypto)
-        is_crypto = symbol.endswith("USD") and len(symbol) > 3
+        # ✅ Detect crypto
+        is_crypto = "/" in symbol
 
+        # ✅ For stocks, respect market hours
         if not is_crypto:
             clock = api.get_clock()
             if not clock.is_open:
                 return {'status': 'error', 'message': 'Market is closed'}
 
-        # ✅ Buying power check (skip for crypto, since buying_power doesn’t apply the same way)
-        if not is_crypto:
-            account = api.get_account()
-            if float(account.buying_power) < 5:
-                return {'status': 'error', 'message': 'Insufficient buying power'}
+        # ✅ Buying power check
+        account = api.get_account()
+        if float(account.buying_power) < 5:
+            return {'status': 'error', 'message': 'Insufficient buying power'}
 
-        # ✅ Get all open positions
+        # ✅ Check existing positions
         positions = api.list_positions()
+        normalized_symbol = normalize_symbol(symbol)
 
-        if positions:
-            holding_tickers = [p.symbol for p in positions]
+        for p in positions:
+            pos_symbol = normalize_symbol(p.symbol)
 
-            # If already holding *any* position, reject unless this is a close-out sell
-            for p in positions:
-                if p.symbol != symbol:
-                    return {
-                        'status': 'skipped',
-                        'message': f'Already holding {p.symbol}, single-position mode enforced'
-                    }
-                elif side == 'buy':
-                    return {
-                        'status': 'skipped',
-                        'message': f'Already holding {symbol}, cannot buy again'
-                    }
-                elif side == 'sell' and int(p.qty) == 0:
-                    return {
-                        'status': 'skipped',
-                        'message': f'No position to sell'
-                    }
+            if pos_symbol != normalized_symbol:
+                return {
+                    'status': 'skipped',
+                    'message': f'Already holding {p.symbol}, single-position mode enforced'
+                }
+            elif side == "buy":
+                return {
+                    'status': 'skipped',
+                    'message': f'Already holding {symbol}, cannot buy again'
+                }
+            elif side == "sell" and int(float(p.qty)) == 0:
+                return {
+                    'status': 'skipped',
+                    'message': f'No position to sell'
+                }
 
-        # ✅ Submit order
+        # ✅ Submit the order (use original symbol with slash)
         order = api.submit_order(
             symbol=symbol,
             qty=qty,
             side=side,
-            type='market',
-            time_in_force='gtc'
+            type="market",
+            time_in_force="gtc"
         )
 
         print(f"✅ Alpaca order placed: {side.upper()} {qty} {symbol}")
-        # Return Alpaca's full raw response (dict-like)
-        return order._raw
+        return {"status": "success", "order_id": order.id}
 
     except tradeapi.rest.APIError as e:
         log_trade_error(symbol, side, e)
-        return {'status': 'error', 'message': f'Alpaca API error: {str(e)}'}
+        return {"status": "error", "message": f"Alpaca API error: {str(e)}"}
 
     except Exception as e:
         log_trade_error(symbol, side, e)
-        return {'status': 'error', 'message': f'Unexpected error: {str(e)}'}
+        return {"status": "error", "message": f"Unexpected error: {str(e)}"}
 
 
 # Optional: Error logging

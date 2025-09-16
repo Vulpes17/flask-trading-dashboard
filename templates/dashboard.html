@@ -178,10 +178,10 @@
                 <thead>
                     <tr>
                         <th>Time</th>
-                        <th>Strategy</th>
-                        <th>Ticker</th>
-                        <th>Signal</th>
-                        <th>Price</th>
+                        <th>Source</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Qty</th>
                         <th>Status</th>
                         <th>Message / Details</th>
                     </tr>
@@ -198,10 +198,12 @@
                             <td>{{ status }}</td>
                             <td>
                                 {{ signal.get('alpaca_status', {}).get('message', 'N/A') }}
-                                <details>
-                                    <summary>Details</summary>
-                                    <pre>{{ signal.get('alpaca_status', {}).get('raw', {}) | tojson(indent=2) }}</pre>
-                                </details>
+                                {% if signal.get('alpaca_status', {}).get('raw') %}
+                                    <details>
+                                        <summary>Details</summary>
+                                        <pre>{{ signal.get('alpaca_status', {}).get('raw', {}) | tojson(indent=2) }}</pre>
+                                    </details>
+                                {% endif %}
                             </td>
                         </tr>
                     {% endfor %}

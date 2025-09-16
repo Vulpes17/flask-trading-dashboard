@@ -1,6 +1,6 @@
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from dotenv import load_dotenv
@@ -190,7 +190,7 @@ def place_order(symbol, side, qty=1, use_paper=True):
             key_id=ALPACA_KEY,
             secret_key=ALPACA_SECRET,
             base_url=BASE_URL,
-            api_version='v2'
+            api_version="v2"
         )
 
         # ✅ Detect crypto
@@ -200,40 +200,36 @@ def place_order(symbol, side, qty=1, use_paper=True):
         if not is_crypto:
             clock = api.get_clock()
             if not clock.is_open:
-                return {'status': 'error', 'message': 'Market is closed'}
+                return {"status": "error", "message": "Market is closed"}
 
         # ✅ Buying power check
         account = api.get_account()
         if float(account.buying_power) < 5:
-            return {'status': 'error', 'message': 'Insufficient buying power'}
+            return {"status": "error", "message": "Insufficient buying power"}
 
         # ✅ Check existing positions
         positions = api.list_positions()
-        normalized_symbol = normalize_symbol(symbol)
-
         for p in positions:
-            pos_symbol = normalize_symbol(p.symbol)
-
-            if pos_symbol != normalized_symbol:
+            if p.symbol.upper() != symbol.replace("/", "").upper():
                 return {
-                    'status': 'skipped',
-                    'message': f'Already holding {p.symbol}, single-position mode enforced'
+                    "status": "skipped",
+                    "message": f"Already holding {p.symbol}, single-position mode enforced",
                 }
             elif side == "buy":
                 return {
-                    'status': 'skipped',
-                    'message': f'Already holding {symbol}, cannot buy again'
+                    "status": "skipped",
+                    "message": f"Already holding {symbol}, cannot buy again",
                 }
             elif side == "sell" and int(float(p.qty)) == 0:
                 return {
-                    'status': 'skipped',
-                    'message': f'No position to sell'
+                    "status": "skipped",
+                    "message": "No position to sell",
                 }
 
-        # ✅ Submit the order (use original symbol with slash)
+        # ✅ Submit order (qty must be string for Alpaca)
         order = api.submit_order(
-            symbol=symbol,
-            qty=qty,
+            symbol=symbol,       # keep slash for crypto
+            qty=str(qty),        # Alpaca requires string
             side=side,
             type="market",
             time_in_force="gtc"
@@ -253,8 +249,11 @@ def place_order(symbol, side, qty=1, use_paper=True):
 
 # Optional: Error logging
 def log_trade_error(symbol, side, error):
+    """Log errors to alpaca_errors.log with UTC timestamps"""
     with open("alpaca_errors.log", "a") as f:
-        f.write(f"{datetime.utcnow().isoformat()} - {symbol} - {side} - {str(error)}\n")
+        f.write(
+            f"{datetime.now(timezone.utc).isoformat()} - {symbol} - {side} - {str(error)}\n"
+        )
     print(f"❌ Error placing order: {error}")
 
 

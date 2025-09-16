@@ -59,10 +59,15 @@ def prettytime_filter(value):
         return value  # fallback if parsing fails
 
 
-@app.route('/dashboard')
+@app.route("/dashboard")
 def dashboard():
-    # show latest 50 signals (already stored in memory)
-    return render_template("dashboard.html", signals=recent_signals[::-1])
+    with open("signal_log.json", "r") as f:
+        signals = json.load(f)
+
+    # Show newest first
+    signals = list(reversed(signals))
+
+    return render_template("dashboard.html", signals=signals)
 
 
 # Webhook endpoint
@@ -114,41 +119,58 @@ def manual_trade():
     side = request.form.get("side", "buy")
 
     try:
-        order_response = place_order(symbol, side, qty) or {}
-        order_id = order_response.get("id", "N/A")
+        order_response = place_order(symbol, qty, side)
+
+        # Normalize status field
         status = order_response.get("status", "unknown")
-        message = order_response.get("message", "N/A")
+        if status not in ["success", "error", "skipped"]:
+            status = "unknown"
+
+        log_entry = {
+            "timestamp": datetime.now(ZoneInfo("UTC")).isoformat(),
+            "timestamp_local": datetime.now(ZoneInfo("US/Central")).isoformat(),
+            "source": "manual",
+            "symbol": symbol,
+            "qty": qty,
+            "side": side,
+            "order_id": order_response.get("id", "N/A"),
+            "alpaca_status": {
+                "status": status,
+                "message": order_response.get("message", "N/A"),
+                "raw": getattr(order_response, "_raw", {})
+            }
+        }
+
+        with open("signal_log.json", "r+") as f:
+            data = json.load(f)
+            data.append(log_entry)
+            f.seek(0)
+            json.dump(data, f, indent=2)
+
+        print(f"✅ Manual trade logged: {log_entry}")
 
     except Exception as e:
-        order_response = {}
-        order_id = "ERROR"
-        status = "failed"
-        message = str(e)
+        log_entry = {
+            "timestamp": datetime.now(ZoneInfo("UTC")).isoformat(),
+            "timestamp_local": datetime.now(ZoneInfo("US/Central")).isoformat(),
+            "source": "manual",
+            "symbol": symbol,
+            "qty": qty,
+            "side": side,
+            "order_id": "N/A",
+            "alpaca_status": {
+                "status": "error",
+                "message": str(e),
+                "raw": {}
+            }
+        }
+        with open("signal_log.json", "r+") as f:
+            data = json.load(f)
+            data.append(log_entry)
+            f.seek(0)
+            json.dump(data, f, indent=2)
+
         print(f"❌ Error placing manual trade: {e}")
-
-    # Build a log entry
-    log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
-        "source": "manual",
-        "symbol": symbol,
-        "qty": qty,
-        "side": side,
-        "order_id": order_id,
-        "alpaca_status": {
-            "status": status,
-            "message": message,
-            "raw": order_response  # 🔥 full Alpaca response for debugging
-        },
-    }
-
-    # Append to signal_log.json
-    with open("signal_log.json", "r+") as f:
-        data = json.load(f)
-        data.append(log_entry)
-        f.seek(0)
-        json.dump(data, f, indent=2)
-
-    print(f"✅ Manual trade logged: {log_entry}")
 
     return redirect(url_for("dashboard"))
 

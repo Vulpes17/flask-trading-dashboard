@@ -3,6 +3,13 @@
 <head>
     <title>Trading Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        tr.success { background-color: #d4edda; }   /* green */
+        tr.error { background-color: #f8d7da; }     /* red */
+        tr.skipped { background-color: #fff3cd; }   /* yellow */
+        tr.unknown { background-color: #e2e3e5; }   /* gray */
+    </style>
 </head>
 <body class="p-3">
     <h1>Trading Dashboard</h1>
@@ -180,30 +187,21 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for signal in signals|reverse %}  {# newest first #}
+                    {% for signal in signals %}
                         {% set status = signal.get('alpaca_status', {}).get('status', 'unknown') %}
-                        <tr
-                          class="
-                            {% if status == 'success' %}table-success{% endif %}
-                            {% if status == 'failed' or status == 'error' %}table-danger{% endif %}
-                            {% if status == 'skipped' %}table-warning{% endif %}
-                          ">
+                        <tr class="{{ status }}">
                             <td>{{ signal.timestamp|prettytime }}</td>
-                            <td>{{ signal.strategy_id or 'manual' }}</td>
-                            <td>{{ signal.symbol or signal.ticker or '--' }}</td>
-                            <td>{{ signal.side or signal.signal or '--' }}</td>
-                            <td>{{ signal.price or '--' }}</td>
+                            <td>{{ signal.source }}</td>
+                            <td>{{ signal.symbol }}</td>
+                            <td>{{ signal.side }}</td>
+                            <td>{{ signal.qty }}</td>
                             <td>{{ status }}</td>
                             <td>
                                 {{ signal.get('alpaca_status', {}).get('message', 'N/A') }}
-                                {% if signal.get('alpaca_status', {}).get('raw') %}
-                                    <details>
-                                        <summary class="text-primary" style="cursor: pointer;">Details</summary>
-                                        <pre class="bg-light p-2 border rounded small" style="max-height: 200px; overflow-y: auto;">
-                                            {{ signal.get('alpaca_status', {}).get('raw') | tojson(indent=2) }}
-                                        </pre>
-                                    </details>
-                                {% endif %}
+                                <details>
+                                    <summary>Details</summary>
+                                    <pre>{{ signal.get('alpaca_status', {}).get('raw', {}) | tojson(indent=2) }}</pre>
+                                </details>
                             </td>
                         </tr>
                     {% endfor %}

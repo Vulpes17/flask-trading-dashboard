@@ -33,7 +33,15 @@
             <h4>Current Status</h4>
             <div class="card mb-3">
                 <div class="card-body">
-                    Account: -- | Take Profit: -- | Sell Type: --
+                    Account: -- | Take Profit: -- | Sell Type: -- <br>
+                    Market Status:
+                    {% if market_status == "OPEN" %}
+                        <span class="badge bg-success">OPEN</span>
+                    {% elif market_status == "CLOSED" %}
+                        <span class="badge bg-danger">CLOSED</span>
+                    {% else %}
+                        <span class="badge bg-warning">{{ market_status }}</span>
+                    {% endif %}
                 </div>
             </div>
 

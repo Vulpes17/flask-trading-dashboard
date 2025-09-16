@@ -67,6 +67,14 @@ def dashboard():
     except (FileNotFoundError, json.JSONDecodeError):
         signals = []
 
+    # Check Alpaca market clock
+    try:
+        api = tradeapi.REST(ALPACA_KEY, ALPACA_SECRET, BASE_URL, api_version="v2")
+        clock = api.get_clock()
+        market_status = "OPEN" if clock.is_open else "CLOSED"
+    except Exception as e:
+        market_status = f"Error: {e}"
+
     # newest first
     signals = list(reversed(signals))
 
@@ -190,61 +198,61 @@ def place_order(symbol, side, qty=1, use_paper=True):
             key_id=ALPACA_KEY,
             secret_key=ALPACA_SECRET,
             base_url=BASE_URL,
-            api_version="v2"
+            api_version='v2'
         )
 
-        # ✅ Detect crypto
-        is_crypto = "/" in symbol
+        # 🕒 Skip market clock check for crypto (24/7 trading)
+        is_crypto = '/' in symbol
 
-        # ✅ For stocks, respect market hours
         if not is_crypto:
             clock = api.get_clock()
-            if not clock.is_open:
-                return {"status": "error", "message": "Market is closed"}
-
-        # ✅ Buying power check
-        account = api.get_account()
-        if float(account.buying_power) < 5:
-            return {"status": "error", "message": "Insufficient buying power"}
-
-        # ✅ Check existing positions
-        positions = api.list_positions()
-        for p in positions:
-            if p.symbol.upper() != symbol.replace("/", "").upper():
-                return {
-                    "status": "skipped",
-                    "message": f"Already holding {p.symbol}, single-position mode enforced",
+            if clock.is_open:
+                print("DEBUG: Market is open, placing MARKET order")
+                order_args = {
+                    "symbol": symbol,
+                    "qty": qty,
+                    "side": side,
+                    "type": "market",
+                    "time_in_force": "gtc"
                 }
-            elif side == "buy":
-                return {
-                    "status": "skipped",
-                    "message": f"Already holding {symbol}, cannot buy again",
+            else:
+                last_price = api.get_last_trade(symbol).price
+                print(f"DEBUG: Market is closed, placing LIMIT order at {last_price}")
+                order_args = {
+                    "symbol": symbol,
+                    "qty": qty,
+                    "side": side,
+                    "type": "limit",
+                    "limit_price": last_price,
+                    "time_in_force": "day",
+                    "extended_hours": True
                 }
-            elif side == "sell" and int(float(p.qty)) == 0:
-                return {
-                    "status": "skipped",
-                    "message": "No position to sell",
-                }
+        else:
+            print("DEBUG: Crypto trade detected, using MARKET order (24/7)")
+            order_args = {
+                "symbol": symbol,
+                "qty": qty,
+                "side": side,
+                "type": "market",
+                "time_in_force": "gtc"
+            }
 
-        # ✅ Submit order (qty must be string for Alpaca)
-        order = api.submit_order(
-            symbol=symbol,       # keep slash for crypto
-            qty=str(qty),        # Alpaca requires string
-            side=side,
-            type="market",
-            time_in_force="gtc"
-        )
-
+        # ✅ Submit order
+        order = api.submit_order(**order_args)
         print(f"✅ Alpaca order placed: {side.upper()} {qty} {symbol}")
-        return {"status": "success", "order_id": order.id}
+        return {
+            'status': 'success',
+            'order_id': order.id,
+            'raw': order._raw
+        }
 
     except tradeapi.rest.APIError as e:
         log_trade_error(symbol, side, e)
-        return {"status": "error", "message": f"Alpaca API error: {str(e)}"}
+        return {'status': 'error', 'message': f'Alpaca API error: {str(e)}', 'raw': {}}
 
     except Exception as e:
         log_trade_error(symbol, side, e)
-        return {"status": "error", "message": f"Unexpected error: {str(e)}"}
+        return {'status': 'error', 'message': f'Unexpected error: {str(e)}', 'raw': {}}
 
 
 # Optional: Error logging

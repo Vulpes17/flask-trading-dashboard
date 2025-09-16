@@ -28,6 +28,70 @@
 
         <!-- Working Tab -->
         <div class="tab-pane fade show active" id="working" role="tabpanel">
+
+            <!-- Current Status -->
+            <h4>Current Status</h4>
+            <div class="card mb-3">
+                <div class="card-body">
+                    Account: -- | Take Profit: -- | Sell Type: --
+                </div>
+            </div>
+
+            <!-- Account Selection -->
+            <h4>Account Selection</h4>
+            <div class="card mb-3">
+                <div class="card-body">
+                    Account TYPE (Select One ONLY):
+                    <div class="mt-2">
+                        <button class="btn btn-outline-primary btn-sm">Live</button>
+                        <button class="btn btn-outline-secondary btn-sm">Paper</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Exit Criteria -->
+            <h4>Exit Criteria Settings</h4>
+            <div class="card mb-3">
+                <div class="card-body">
+                    Exit on Profit (Select One ONLY):
+                    <button class="btn btn-outline-success btn-sm">+25%</button>
+                    <button class="btn btn-outline-success btn-sm">+10%</button>
+                    <br><br>
+                    Sell TYPE (Select One ONLY):
+                    <button class="btn btn-outline-dark btn-sm">Market</button>
+                    <button class="btn btn-outline-dark btn-sm">Limit</button>
+                    <p class="mt-2"><small>(Stop loss handled by Pine Script)</small></p>
+                </div>
+            </div>
+
+            <!-- Trade Window -->
+            <h4>Trade Window</h4>
+            <table class="table table-bordered table-sm">
+                <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Buy Price</th>
+                        <th>Current Price</th>
+                        <th>Qty</th>
+                        <th>+/- %</th>
+                        <th>+/- $</th>
+                        <th>Account Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- Manual Trades -->
             <h4>Manual Trades - Paper Only</h4>
             <table class="table table-bordered table-sm">
                 <thead>
@@ -93,6 +157,18 @@
                     </tr>
                 </tbody>
             </table>
+
+            <!-- Strategy Controls -->
+            <h4>Strategy Controls</h4>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="strategyA">
+                <label class="form-check-label" for="strategyA">Strategy A</label>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="strategyB">
+                <label class="form-check-label" for="strategyB">Strategy B</label>
+            </div>
+
         </div>
 
         <!-- Log Tab -->
@@ -102,12 +178,12 @@
                 <thead>
                     <tr>
                         <th>Time</th>
-                        <th>Source</th>
+                        <th>Strategy</th>
                         <th>Ticker</th>
-                        <th>Side</th>
-                        <th>Qty</th>
+                        <th>Signal</th>
+                        <th>Price</th>
                         <th>Status</th>
-                        <th>Message</th>
+                        <th>Message / Details</th>
                     </tr>
                 </thead>
                 <tbody>

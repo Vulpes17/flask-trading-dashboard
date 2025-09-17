@@ -2,6 +2,8 @@ import os
 import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+
+import requests
 from flask import Flask, request, jsonify, render_template, redirect, url_for
 from dotenv import load_dotenv
 import alpaca_trade_api as tradeapi
@@ -95,14 +97,28 @@ def webhook():
             if field not in data:
                 return jsonify({"status": "error", "message": f"Missing field: {field}"}), 400
 
+        strategy_id = data["strategy_id"]
+        action = data["signal"].lower()
+        ticker = data["ticker"].upper()
+        price = float(data["price"])
+
         signal = {
-            "strategy_id": data["strategy_id"],
-            "signal": data["signal"].lower(),
-            "ticker": data["ticker"].upper(),
-            "price": float(data["price"]),
+            "strategy_id": strategy_id,
+            "signal": action,
+            "ticker": ticker,
+            "price": price,
             "timestamp": datetime.utcnow().isoformat(),
             "alpaca_status": {}  # placeholder, updated after trade attempt
         }
+
+        # ✅ Route to strategy handler
+        if strategy_id == "spy_options":
+            result = handle_spy_options(action, ticker, price)
+            signal["alpaca_status"] = {
+                "status": result.get("status", "error"),
+                "message": result.get("message", "N/A"),
+                "raw": result
+            }
 
         # Add to in-memory log
         recent_signals.append(signal)
@@ -114,15 +130,37 @@ def webhook():
         except Exception as e:
             app.logger.error(f"Error writing signal_log.json: {e}")
 
-        # Place order (optional)
-        # result = place_order(signal["ticker"], signal["signal"], 1, use_paper=USE_PAPER)
-        # signal["alpaca_status"] = result
-
         return jsonify({"status": "success", "signal": signal}), 200
 
     except Exception as e:
         app.logger.error(f"Webhook error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+
+def handle_spy_options(action, ticker, price):
+    url = f"{BASE_URL}/v2/options/orders"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET
+    }
+
+    # 🔒 Hardcoded for testing (update this with a real contract)
+    option_symbol = "SPY250917C00658000"
+    # SPY, Sept 19 2025 expiry, 500 strike call
+
+    order = {
+        "symbol": option_symbol,
+        "qty": 1,
+        "side": action.lower(),
+        "type": "market",
+        "time_in_force": "day"
+    }
+
+    r = requests.post(url, json=order, headers=headers)
+    response = r.json()
+    print("Options order response:", response)
+    return response
 
 
 @app.route("/manual_trade", methods=["POST"])

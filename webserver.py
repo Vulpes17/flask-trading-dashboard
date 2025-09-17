@@ -146,7 +146,7 @@ def handle_spy_options(action, ticker, price):
     }
 
     # 🔒 Hardcoded for testing (update this with a real contract)
-    option_symbol = "SPY250917C00658000"
+    option_symbol = "SPY250919C550"
     # SPY, Sept 19 2025 expiry, 500 strike call
 
     order = {

@@ -137,29 +137,81 @@ def webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+def build_atm_0dte_call(ticker, price):
+    """Return OCC symbol for the 0DTE ATM Call contract"""
+    import requests
+    from datetime import datetime
+
+    url = f"https://data.alpaca.markets/v1beta1/options/snapshots/{ticker}"
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET
+    }
+    r = requests.get(url, headers=headers)
+    data = r.json().get("snapshots", {})
+
+    if not data:
+        raise ValueError("No option chain data returned from Alpaca")
+
+    today = datetime.now().strftime("%y%m%d")
+
+    candidates = []
+    for sym, snap in data.items():
+        if not sym.startswith(ticker):
+            continue
+        expiry = sym[len(ticker):len(ticker)+6]  # YYMMDD
+        if expiry != today:   # only same-day expiry (0DTE)
+            continue
+        if "C" not in sym:    # Calls only
+            continue
+
+        try:
+            strike = float(snap["last_quote"]["strike_price"])
+        except Exception:
+            strike = None
+
+        if strike is not None:
+            candidates.append((abs(strike - price), sym))
+
+    if not candidates:
+        raise ValueError(f"No 0DTE calls found for {ticker}")
+
+    candidates.sort(key=lambda x: x[0])
+    return candidates[0][1]
+
 
 def handle_spy_options(action, ticker, price):
     url = f"{BASE_URL}/v2/options/orders"
     headers = {
         "APCA-API-KEY-ID": ALPACA_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET
+        "APCA-API-SECRET-KEY": ALPACA_SECRET,
+        "Content-Type": "application/json"
     }
 
-    # 🔒 Hardcoded for testing (update this with a real contract)
-    option_symbol = "SPY250919C550"
-    # SPY, Sept 19 2025 expiry, 500 strike call
+    try:
+        option_symbol = build_atm_0dte_call(ticker, price)
+        print(f"📌 Selected 0DTE contract: {option_symbol} (ATM ~ {price})")
+    except Exception as e:
+        print("❌ Error building option symbol:", e)
+        return {"status": "error", "message": str(e)}
 
     order = {
         "symbol": option_symbol,
-        "qty": 1,
-        "side": action.lower(),
+        "qty": "1",                  # Alpaca docs show qty as string
+        "side": action.lower(),      # "buy" or "sell"
         "type": "market",
         "time_in_force": "day"
     }
 
+    print("📤 Sending order to Alpaca:", order)
+
     r = requests.post(url, json=order, headers=headers)
-    response = r.json()
-    print("Options order response:", response)
+    try:
+        response = r.json()
+    except Exception:
+        response = {"error": "Non-JSON response", "body": r.text}
+
+    print("✅ Options order response:", response)
     return response
 
 

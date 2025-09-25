@@ -28,3 +28,6 @@ cheat_sheet.txt
 
 # Trading View pinescript strategies
 tv_strategies.txt
+
+# Backup files incase they break while testing
+backup_code.txt

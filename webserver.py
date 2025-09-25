@@ -1,369 +1,224 @@
+# ================================
+# Imports & Config
+# ================================
 import os
 import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from flask import Flask, request, jsonify, render_template
 import requests
-from flask import Flask, request, jsonify, render_template, redirect, url_for
-from dotenv import load_dotenv
 import alpaca_trade_api as tradeapi
-# from flask import render_template
+from dotenv import load_dotenv
 
-# Load environment variables from .env
+# Load environment variables
 load_dotenv()
-
-# Load keys from .env
-USE_PAPER = True  # Toggle this to False for live trades
-
-if USE_PAPER:
-    ALPACA_KEY = os.getenv('APCA_API_KEY_ID_PAPER')
-    ALPACA_SECRET = os.getenv('APCA_API_SECRET_KEY_PAPER')
-    BASE_URL = 'https://paper-api.alpaca.markets'
-else:
-    ALPACA_KEY = os.getenv('APCA_API_KEY_ID_LIVE')
-    ALPACA_SECRET = os.getenv('APCA_API_SECRET_KEY_LIVE')
-    BASE_URL = 'https://api.alpaca.markets'
-
 
 # Flask app
 app = Flask(__name__)
 
-# Required fields and signal types
-REQUIRED_FIELDS = {'strategy_id', 'signal', 'ticker', 'price'}
-VALID_SIGNALS = {'buy', 'sell'}
+# Toggle Paper vs Live (TODO: connect this to a webpage button)
+USE_PAPER = True
+if USE_PAPER:
+    ALPACA_KEY = os.getenv("APCA_API_KEY_ID_PAPER")
+    ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY_PAPER")
+    BASE_URL = "https://paper-api.alpaca.markets"
+else:
+    ALPACA_KEY = os.getenv("APCA_API_KEY_ID_LIVE")
+    ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY_LIVE")
+    BASE_URL = "https://api.alpaca.markets"
 
-# Signal storage
-SIGNAL_LOG_FILE = 'signal_log.json'
-recent_signals = []
+# Log file paths
+SIGNAL_LOG = "signal_log.json"
+TRADE_LOG = "trade_log.json"
 
-# Load past signals at startup
-try:
-    with open(SIGNAL_LOG_FILE, 'r') as f:
-        recent_signals = json.load(f)
-    print(f"📦 Loaded {len(recent_signals)} past signals into memory.")
-except (FileNotFoundError, json.JSONDecodeError):
-    recent_signals = []
-    print("📂 No signal log found — starting fresh.")
-
-
-@app.template_filter('prettytime')
-def prettytime_filter(value):
+# ================================
+# Filters & Routes
+# ================================
+@app.template_filter("prettytime")
+def prettytime_filter(value: str) -> str:
+    """Convert UTC ISO timestamp into local time (for dashboard display)."""
     try:
-        # Parse ISO timestamp from logs
-        dt = datetime.fromisoformat(value.replace("Z", ""))
-
-        # Convert UTC → Local
-        dt_utc = dt.replace(tzinfo=ZoneInfo("UTC"))
-        dt_local = dt_utc.astimezone(ZoneInfo("US/Central"))  # change this to your timezone
-
-        return dt_local.strftime("%Y-%m-%d %H:%M:%S")
+        dt_utc = datetime.fromisoformat(value.replace("Z", "")).replace(tzinfo=ZoneInfo("UTC"))
+        return dt_utc.astimezone(ZoneInfo("US/Central")).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
-        return value  # fallback if parsing fails
+        return value
 
 
 @app.route("/dashboard")
 def dashboard():
-    try:
-        with open("signal_log.json", "r") as f:
-            signals = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        signals = []
-
-    # Check Alpaca market clock
-    try:
-        api = tradeapi.REST(ALPACA_KEY, ALPACA_SECRET, BASE_URL, api_version="v2")
-        clock = api.get_clock()
-        market_status = "OPEN" if clock.is_open else "CLOSED"
-    except Exception as e:
-        market_status = f"Error: {e}"
-
-    # newest first
-    signals = list(reversed(signals))
-
-    print(f"DEBUG — market_status = {market_status}")  # 🔎 debug line
-
-    return render_template("dashboard.html", signals=signals, market_status=market_status)
+    """Main dashboard page: display signals, trade log, and market status."""
+    # TODO: load logs and account info
+    return render_template("dashboard.html")
 
 
-# Webhook endpoint
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.get_json()
+        # 1. Parse + Validate webhook payload
+        data = request.get_json(force=True)
+        if not validate_webhook(data):
+            return jsonify({"status": "error", "message": "Invalid payload"}), 400
 
-        # ✅ Basic validation
-        required_fields = ["strategy_id", "signal", "ticker", "price"]
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"status": "error", "message": f"Missing field: {field}"}), 400
-
-        strategy_id = data["strategy_id"]
-        action = data["signal"].lower()
-        ticker = data["ticker"].upper()
-        price = float(data["price"])
-
-        signal = {
-            "strategy_id": strategy_id,
-            "signal": action,
-            "ticker": ticker,
-            "price": price,
-            "timestamp": datetime.utcnow().isoformat(),
-            "alpaca_status": {}  # placeholder, updated after trade attempt
-        }
-
-        # ✅ Route to strategy handler
-        if strategy_id == "spy_options":
-            result = handle_spy_options(action, ticker, price)
-            signal["alpaca_status"] = {
-                "status": result.get("status", "error"),
-                "message": result.get("message", "N/A"),
-                "raw": result
-            }
-
-        # Add to in-memory log
-        recent_signals.append(signal)
-
-        # ✅ Save immediately to disk
-        try:
-            with open("signal_log.json", "w") as f:
-                json.dump(recent_signals, f, indent=2)
-        except Exception as e:
-            app.logger.error(f"Error writing signal_log.json: {e}")
-
-        return jsonify({"status": "success", "signal": signal}), 200
-
-    except Exception as e:
-        app.logger.error(f"Webhook error: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-def build_atm_0dte_call(ticker, price):
-    """Return OCC symbol for the 0DTE ATM Call contract"""
-    import requests
-    from datetime import datetime
-
-    url = f"https://data.alpaca.markets/v1beta1/options/snapshots/{ticker}"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET
-    }
-    r = requests.get(url, headers=headers)
-    data = r.json().get("snapshots", {})
-
-    if not data:
-        raise ValueError("No option chain data returned from Alpaca")
-
-    today = datetime.now().strftime("%y%m%d")
-
-    candidates = []
-    for sym, snap in data.items():
-        if not sym.startswith(ticker):
-            continue
-        expiry = sym[len(ticker):len(ticker)+6]  # YYMMDD
-        if expiry != today:   # only same-day expiry (0DTE)
-            continue
-        if "C" not in sym:    # Calls only
-            continue
-
-        try:
-            strike = float(snap["last_quote"]["strike_price"])
-        except Exception:
-            strike = None
-
-        if strike is not None:
-            candidates.append((abs(strike - price), sym))
-
-    if not candidates:
-        raise ValueError(f"No 0DTE calls found for {ticker}")
-
-    candidates.sort(key=lambda x: x[0])
-    return candidates[0][1]
-
-
-def handle_spy_options(action, ticker, price):
-    url = f"{BASE_URL}/v2/options/orders"
-    headers = {
-        "APCA-API-KEY-ID": ALPACA_KEY,
-        "APCA-API-SECRET-KEY": ALPACA_SECRET,
-        "Content-Type": "application/json"
-    }
-
-    try:
-        option_symbol = build_atm_0dte_call(ticker, price)
-        print(f"📌 Selected 0DTE contract: {option_symbol} (ATM ~ {price})")
-    except Exception as e:
-        print("❌ Error building option symbol:", e)
-        return {"status": "error", "message": str(e)}
-
-    order = {
-        "symbol": option_symbol,
-        "qty": "1",                  # Alpaca docs show qty as string
-        "side": action.lower(),      # "buy" or "sell"
-        "type": "market",
-        "time_in_force": "day"
-    }
-
-    print("📤 Sending order to Alpaca:", order)
-
-    r = requests.post(url, json=order, headers=headers)
-    try:
-        response = r.json()
-    except Exception:
-        response = {"error": "Non-JSON response", "body": r.text}
-
-    print("✅ Options order response:", response)
-    return response
-
-
-@app.route("/manual_trade", methods=["POST"])
-def manual_trade():
-    symbol = request.form.get("symbol")
-    qty = int(request.form.get("qty", 1))
-    side = request.form.get("side", "buy")
-
-    try:
-        order_response = place_order(symbol, qty, side)
-
-        # Normalize status field
-        status = order_response.get("status", "unknown")
-        if status not in ["success", "error", "skipped"]:
-            status = "unknown"
-
-        log_entry = {
-            "timestamp": datetime.now(ZoneInfo("UTC")).isoformat(),
-            "timestamp_local": datetime.now(ZoneInfo("US/Central")).isoformat(),
-            "source": "manual",
-            "symbol": symbol,
-            "qty": qty,
-            "side": side,
-            "order_id": order_response.get("id", "N/A"),
-            "alpaca_status": {
-                "status": status,
-                "message": order_response.get("message", "N/A"),
-                "raw": getattr(order_response, "_raw", {})
-            }
-        }
-
-        with open("signal_log.json", "r+") as f:
-            data = json.load(f)
-            data.append(log_entry)
-            f.seek(0)
-            json.dump(data, f, indent=2)
-
-        print(f"✅ Manual trade logged: {log_entry}")
-
-    except Exception as e:
-        log_entry = {
-            "timestamp": datetime.now(ZoneInfo("UTC")).isoformat(),
-            "timestamp_local": datetime.now(ZoneInfo("US/Central")).isoformat(),
-            "source": "manual",
-            "symbol": symbol,
-            "qty": qty,
-            "side": side,
-            "order_id": "N/A",
-            "alpaca_status": {
-                "status": "error",
-                "message": str(e),
-                "raw": {}
-            }
-        }
-        with open("signal_log.json", "r+") as f:
-            data = json.load(f)
-            data.append(log_entry)
-            f.seek(0)
-            json.dump(data, f, indent=2)
-
-        print(f"❌ Error placing manual trade: {e}")
-
-    return redirect(url_for("dashboard"))
-
-
-# Alpaca trading logic
-def normalize_symbol(symbol: str) -> str:
-    """Normalize symbols so ETH/USD == ETHUSD"""
-    return symbol.replace("/", "").upper()
-
-
-def place_order(symbol, side, qty=1, use_paper=True):
-    try:
+        # 2. Get Alpaca account info once
         api = tradeapi.REST(
             key_id=ALPACA_KEY,
             secret_key=ALPACA_SECRET,
             base_url=BASE_URL,
-            api_version='v2'
+            api_version="v2"
         )
+        account = api.get_account()
 
-        # 🕒 Skip market clock check for crypto (24/7 trading)
-        is_crypto = '/' in symbol
+        # 3. Checkpoints (explicitly listed)
+        msg = check_status(data, account)
+        if msg:
+            return jsonify({"status": "blocked", "message": msg}), 200
 
-        if not is_crypto:
-            clock = api.get_clock()
-            if clock.is_open:
-                print("DEBUG: Market is open, placing MARKET order")
-                order_args = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "type": "market",
-                    "time_in_force": "gtc"
-                }
-            else:
-                last_price = api.get_last_trade(symbol).price
-                print(f"DEBUG: Market is closed, placing LIMIT order at {last_price}")
-                order_args = {
-                    "symbol": symbol,
-                    "qty": qty,
-                    "side": side,
-                    "type": "limit",
-                    "limit_price": last_price,
-                    "time_in_force": "day",
-                    "extended_hours": True
-                }
-        else:
-            print("DEBUG: Crypto trade detected, using MARKET order (24/7)")
-            order_args = {
-                "symbol": symbol,
-                "qty": qty,
-                "side": side,
-                "type": "market",
-                "time_in_force": "gtc"
-            }
+        msg = check_daytrade_count(data, account)
+        if msg:
+            return jsonify({"status": "blocked", "message": msg}), 200
 
-        # ✅ Submit order
-        order = api.submit_order(**order_args)
-        print(f"✅ Alpaca order placed: {side.upper()} {qty} {symbol}")
-        return {
-            'status': 'success',
-            'order_id': order.id,
-            'raw': order._raw
-        }
+        msg = check_cash_balance(data, account)
+        if msg:
+            return jsonify({"status": "blocked", "message": msg}), 200
 
-    except tradeapi.rest.APIError as e:
-        log_trade_error(symbol, side, e)
-        return {'status': 'error', 'message': f'Alpaca API error: {str(e)}', 'raw': {}}
+        # 4. Route strategy: options, equity, or crypto
+        result = options_or_equity(data)
+
+        # 5. Log + return result
+        log_signal(data)
+        return jsonify({"status": "success", "result": result}), 200
 
     except Exception as e:
-        log_trade_error(symbol, side, e)
-        return {'status': 'error', 'message': f'Unexpected error: {str(e)}', 'raw': {}}
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
-# Optional: Error logging
-def log_trade_error(symbol, side, error):
-    """Log errors to alpaca_errors.log with UTC timestamps"""
-    with open("alpaca_errors.log", "a") as f:
-        f.write(
-            f"{datetime.now(timezone.utc).isoformat()} - {symbol} - {side} - {str(error)}\n"
-        )
-    print(f"❌ Error placing order: {error}")
-
-
-# Root test route
-@app.route('/')
+@app.route("/")
 def home():
+    """Health check route."""
     return "<h1>Trading Dashboard is running!</h1>"
 
 
-# Run the app
+# ================================
+# Webhook Validation
+# ================================
+def validate_webhook(data: dict) -> bool:
+    """Check that required fields exist in the webhook payload."""
+    REQUIRED_FIELDS = {"strategy_id", "signal", "ticker"}
+    return all(field in data for field in REQUIRED_FIELDS)
+
+
+# ================================
+# Checkpoints
+# ================================
+def check_status(data, account):
+    """Block if account is not active."""
+    if account.status != "ACTIVE":
+        return f"Account status is {account.status}"
+    return None
+
+
+def check_daytrade_count(data, account):
+    """Block if no day trades left."""
+    if int(account.daytrade_count) <= 0:
+        return "No day trades left"
+    return None
+
+
+def check_cash_balance(data, account):
+    """Block if cash balance too low."""
+    if float(account.cash) < 100:
+        return "Insufficient balance"
+    return None
+
+
+# ================================
+# Trade Routing
+# ================================
+def options_or_equity(signal: dict):
+    """Decide if webhook is for options, equities, or crypto."""
+    strategy_id = signal.get("strategy_id", "").lower()
+
+    if "options" in strategy_id:
+        order_json = build_options_order(signal)
+    elif "crypto" in strategy_id:
+        order_json = build_crypto_order(signal)
+    else:
+        order_json = build_equity_order(signal)
+
+    return send_order_to_alpaca(order_json)
+
+
+# ================================
+# Order Builders
+# ================================
+def build_options_order(signal: dict) -> dict:
+    """Build JSON payload for Alpaca options order (e.g., ATM 0DTE call)."""
+    return {
+        "symbol": "SPY250919C00500000",  # placeholder
+        "qty": 1,
+        "side": signal["signal"],
+        "type": "market",
+        "time_in_force": "day"
+    }
+
+
+def build_equity_order(signal: dict) -> dict:
+    """Build JSON payload for Alpaca equity order."""
+    return {
+        "symbol": signal["ticker"],
+        "qty": 1,
+        "side": signal["signal"],
+        "type": "market",
+        "time_in_force": "day"
+    }
+
+
+def build_crypto_order(signal: dict) -> dict:
+    """Build JSON payload for Alpaca crypto order (future)."""
+    return {}
+
+
+# ================================
+# Alpaca Execution
+# ================================
+def send_order_to_alpaca(order_json: dict) -> dict:
+    """Send JSON order payload to Alpaca REST API."""
+    url = f"{BASE_URL}/v2/orders" if "C" not in order_json["symbol"] else f"{BASE_URL}/v2/options/orders"
+    headers = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
+
+    try:
+        r = requests.post(url, json=order_json, headers=headers)
+        return r.json()
+    except Exception as e:
+        log_trade_error(order_json.get("symbol", "N/A"), order_json.get("side", "N/A"), e)
+        return {"status": "error", "message": str(e)}
+
+
+# ================================
+# Logging Helpers
+# ================================
+def log_signal(signal: dict):
+    """Append webhook signal to signal_log.json."""
+    try:
+        with open(SIGNAL_LOG, "r+") as f:
+            data = json.load(f)
+            data.append(signal)
+            f.seek(0)
+            json.dump(data, f, indent=2)
+    except FileNotFoundError:
+        with open(SIGNAL_LOG, "w") as f:
+            json.dump([signal], f, indent=2)
+
+
+def log_trade_error(symbol: str, side: str, error: Exception):
+    """Log trade execution errors to trade_log.json or file."""
+    with open("alpaca_errors.log", "a") as f:
+        f.write(f"{datetime.now(timezone.utc).isoformat()} - {symbol} - {side} - {error}\n")
+
+# ================================
+# Run Server
+# ================================
 if __name__ == "__main__":
     from waitress import serve
     import logging

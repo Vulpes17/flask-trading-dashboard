@@ -48,8 +48,34 @@ def prettytime_filter(value: str) -> str:
 @app.route("/dashboard")
 def dashboard():
     """Main dashboard page: display signals, trade log, and market status."""
-    # TODO: load logs and account info
-    return render_template("dashboard.html")
+    # Load signal log
+    try:
+        with open(SIGNAL_LOG, "r") as f:
+            signals = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        signals = []
+
+    # Load trade log
+    try:
+        with open(TRADE_LOG, "r") as f:
+            trades = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        trades = []
+
+    # Get market status from Alpaca
+    try:
+        api = tradeapi.REST(ALPACA_KEY, ALPACA_SECRET, BASE_URL, api_version="v2")
+        clock = api.get_clock()
+        market_status = "OPEN" if clock.is_open else "CLOSED"
+    except Exception as e:
+        market_status = f"Error: {e}"
+
+    return render_template(
+        "dashboard.html",
+        signals=signals,
+        trades=trades,
+        market_status=market_status
+    )
 
 
 @app.route("/webhook", methods=["POST"])

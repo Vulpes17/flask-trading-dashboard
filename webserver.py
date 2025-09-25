@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 import requests
 import alpaca_trade_api as tradeapi
 from dotenv import load_dotenv
@@ -78,6 +78,12 @@ def dashboard():
     )
 
 
+@app.route("/")
+def home():
+    """Redirect root to dashboard page."""
+    return redirect(url_for("dashboard"))
+
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -117,12 +123,6 @@ def webhook():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
-
-
-@app.route("/")
-def home():
-    """Health check route."""
-    return "<h1>Trading Dashboard is running!</h1>"
 
 
 # ================================

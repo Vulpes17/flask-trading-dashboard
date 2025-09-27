@@ -17,20 +17,68 @@ load_dotenv()
 # Flask app
 app = Flask(__name__)
 
-# Toggle Paper vs Live (TODO: connect this to a webpage button)
-USE_PAPER = True
-if USE_PAPER:
-    ALPACA_KEY = os.getenv("APCA_API_KEY_ID_PAPER")
-    ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY_PAPER")
-    BASE_URL = "https://paper-api.alpaca.markets"
-else:
-    ALPACA_KEY = os.getenv("APCA_API_KEY_ID_LIVE")
-    ALPACA_SECRET = os.getenv("APCA_API_SECRET_KEY_LIVE")
-    BASE_URL = "https://api.alpaca.markets"
-
-# Log file paths
+# File paths
 SIGNAL_LOG = "signal_log.json"
 TRADE_LOG = "trade_log.json"
+MODE_FILE = "mode.json"
+
+
+# ================================
+# Mode Management
+# ================================
+def get_current_mode():
+    try:
+        with open(MODE_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # Default values if file missing
+        return {"account_type": "paper", "trade_mode": "test"}
+
+
+def set_current_mode(account_type=None, trade_mode=None):
+    mode = get_current_mode()
+    if account_type:
+        mode["account_type"] = account_type
+    if trade_mode:
+        mode["trade_mode"] = trade_mode
+    with open(MODE_FILE, "w") as f:
+        json.dump(mode, f)
+
+@app.route("/set_mode", methods=["POST"])
+def set_mode():
+    account_type = request.form.get("account_type")
+    trade_mode = request.form.get("trade_mode")
+    if account_type not in ["paper", "live"]:
+        account_type = "paper"
+    if trade_mode not in ["test", "real"]:
+        trade_mode = "test"
+    set_current_mode(account_type, trade_mode)
+    return redirect(url_for("dashboard"))
+
+def get_alpaca_keys():
+    """Return Alpaca keys/URL depending on account type."""
+    mode = get_current_mode()
+    if mode["account_type"] == "paper":
+        return (
+            os.getenv("APCA_API_KEY_ID_PAPER"),
+            os.getenv("APCA_API_SECRET_KEY_PAPER"),
+            "https://paper-api.alpaca.markets",
+        )
+    else:
+        return (
+            os.getenv("APCA_API_KEY_ID_LIVE"),
+            os.getenv("APCA_API_SECRET_KEY_LIVE"),
+            "https://api.alpaca.markets",
+        )
+
+@app.route("/set_mode", methods=["POST"])
+def set_mode():
+    account_type = request.form.get("account_type", "paper").lower()
+    if account_type not in ["paper", "live"]:
+        account_type = "paper"
+    set_current_mode(account_type)
+    return redirect(url_for("dashboard"))
+
 
 # ================================
 # Filters & Routes
@@ -47,31 +95,37 @@ def prettytime_filter(value: str) -> str:
 
 @app.route("/dashboard")
 def dashboard():
-    """Main dashboard page: display signals, trade log, and market status."""
-    # Load signal log
+    # Load logs
     try:
         with open(SIGNAL_LOG, "r") as f:
             signals = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         signals = []
 
-    # Load trade log
     try:
         with open(TRADE_LOG, "r") as f:
             trades = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         trades = []
 
-    # Get market status from Alpaca
+    # Market status
     try:
+        ALPACA_KEY, ALPACA_SECRET, BASE_URL = get_alpaca_keys()
         api = tradeapi.REST(ALPACA_KEY, ALPACA_SECRET, BASE_URL, api_version="v2")
         clock = api.get_clock()
         market_status = "OPEN" if clock.is_open else "CLOSED"
     except Exception as e:
         market_status = f"Error: {e}"
 
+    # ✅ Unpack current_mode dict
+    mode = get_current_mode()
+    account_type = mode.get("account_type", "paper")
+    trade_mode = mode.get("trade_mode", "test")
+
     return render_template(
         "dashboard.html",
+        account_type=account_type,
+        trade_mode=trade_mode,
         signals=signals,
         trades=trades,
         market_status=market_status
@@ -86,6 +140,8 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    ALPACA_KEY, ALPACA_SECRET, BASE_URL = get_alpaca_keys()
+
     try:
         # 1. Parse + Validate webhook payload
         data = request.get_json(force=True)
@@ -93,15 +149,10 @@ def webhook():
             return jsonify({"status": "error", "message": "Invalid payload"}), 400
 
         # 2. Get Alpaca account info once
-        api = tradeapi.REST(
-            key_id=ALPACA_KEY,
-            secret_key=ALPACA_SECRET,
-            base_url=BASE_URL,
-            api_version="v2"
-        )
+        api = tradeapi.REST(ALPACA_KEY, ALPACA_SECRET, BASE_URL, api_version="v2")
         account = api.get_account()
 
-        # 3. Checkpoints (explicitly listed)
+        # 3. Checkpoints
         msg = check_status(data, account)
         if msg:
             return jsonify({"status": "blocked", "message": msg}), 200
@@ -129,7 +180,6 @@ def webhook():
 # Webhook Validation
 # ================================
 def validate_webhook(data: dict) -> bool:
-    """Check that required fields exist in the webhook payload."""
     REQUIRED_FIELDS = {"strategy_id", "signal", "ticker"}
     return all(field in data for field in REQUIRED_FIELDS)
 
@@ -138,22 +188,17 @@ def validate_webhook(data: dict) -> bool:
 # Checkpoints
 # ================================
 def check_status(data, account):
-    """Block if account is not active."""
     if account.status != "ACTIVE":
         return f"Account status is {account.status}"
     return None
 
-
 def check_daytrade_count(data, account):
-    """Block if no day trades left."""
     if int(account.daytrade_count) <= 0:
         return "No day trades left"
     return None
 
-
 def check_cash_balance(data, account):
-    """Block if cash balance too low."""
-    if float(account.cash) < 100:
+    if float(account.cash) < 200:
         return "Insufficient balance"
     return None
 
@@ -164,9 +209,13 @@ def check_cash_balance(data, account):
 def options_or_equity(signal: dict):
     """Decide if webhook is for options, equities, or crypto."""
     strategy_id = signal.get("strategy_id", "").lower()
+    mode = get_current_mode()
 
     if "options" in strategy_id:
-        order_json = build_options_order(signal)
+        if mode["trade_mode"] == "test":
+            order_json = build_options_explorer(signal)
+        else:
+            order_json = build_options_order(signal)
     elif "crypto" in strategy_id:
         order_json = build_crypto_order(signal)
     else:
@@ -179,7 +228,6 @@ def options_or_equity(signal: dict):
 # Order Builders
 # ================================
 def build_options_order(signal: dict) -> dict:
-    """Build JSON payload for Alpaca options order (e.g., ATM 0DTE call)."""
     return {
         "symbol": "SPY250919C00500000",  # placeholder
         "qty": 1,
@@ -188,9 +236,16 @@ def build_options_order(signal: dict) -> dict:
         "time_in_force": "day"
     }
 
+def build_options_explorer(signal: dict) -> dict:
+    return {
+        "symbol": "SPY250919C00500000",  # placeholder
+        "qty": 1,
+        "side": signal["signal"],
+        "type": "market",
+        "time_in_force": "day"
+    }
 
 def build_equity_order(signal: dict) -> dict:
-    """Build JSON payload for Alpaca equity order."""
     return {
         "symbol": signal["ticker"],
         "qty": 1,
@@ -199,9 +254,7 @@ def build_equity_order(signal: dict) -> dict:
         "time_in_force": "day"
     }
 
-
 def build_crypto_order(signal: dict) -> dict:
-    """Build JSON payload for Alpaca crypto order (future)."""
     return {}
 
 
@@ -209,7 +262,7 @@ def build_crypto_order(signal: dict) -> dict:
 # Alpaca Execution
 # ================================
 def send_order_to_alpaca(order_json: dict) -> dict:
-    """Send JSON order payload to Alpaca REST API."""
+    ALPACA_KEY, ALPACA_SECRET, BASE_URL = get_alpaca_keys()
     url = f"{BASE_URL}/v2/orders" if "C" not in order_json["symbol"] else f"{BASE_URL}/v2/options/orders"
     headers = {"APCA-API-KEY-ID": ALPACA_KEY, "APCA-API-SECRET-KEY": ALPACA_SECRET}
 
@@ -225,7 +278,6 @@ def send_order_to_alpaca(order_json: dict) -> dict:
 # Logging Helpers
 # ================================
 def log_signal(signal: dict):
-    """Append webhook signal to signal_log.json."""
     try:
         with open(SIGNAL_LOG, "r+") as f:
             data = json.load(f)
@@ -236,11 +288,10 @@ def log_signal(signal: dict):
         with open(SIGNAL_LOG, "w") as f:
             json.dump([signal], f, indent=2)
 
-
 def log_trade_error(symbol: str, side: str, error: Exception):
-    """Log trade execution errors to trade_log.json or file."""
     with open("alpaca_errors.log", "a") as f:
         f.write(f"{datetime.now(timezone.utc).isoformat()} - {symbol} - {side} - {error}\n")
+
 
 # ================================
 # Run Server

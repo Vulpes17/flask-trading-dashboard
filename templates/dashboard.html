@@ -1,226 +1,114 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Trading Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
-    <style>
-        tr.success { background-color: #d4edda; }   /* green */
-        tr.error { background-color: #f8d7da; }     /* red */
-        tr.skipped { background-color: #fff3cd; }   /* yellow */
-        tr.unknown { background-color: #e2e3e5; }   /* gray */
-    </style>
+  <meta charset="UTF-8">
+  <title>Trading Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
+    h1 { color: #333; }
+    .box { background: #fff; padding: 15px; margin-bottom: 20px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { padding: 8px 10px; border: 1px solid #ddd; text-align: left; }
+    th { background: #f0f0f0; }
+    .success { color: green; }
+    .error { color: red; }
+  </style>
 </head>
-<body class="p-3">
-    <h1>Trading Dashboard</h1>
+<body>
+  <h1>Trading Dashboard</h1>
 
-    <!-- Tabs -->
-    <ul class="nav nav-tabs" id="dashboardTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="working-tab" data-bs-toggle="tab" data-bs-target="#working" type="button" role="tab">Working</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="log-tab" data-bs-toggle="tab" data-bs-target="#log" type="button" role="tab">Log</button>
-        </li>
-    </ul>
+  <!-- Mode Selection -->
+  <div class="box">
+    <h2>Mode Selection</h2>
+    <form action="/set_mode" method="POST">
+      <label for="account_type">Account Type:</label>
+      <select name="account_type" id="account_type">
+        {% if account_type == "paper" %}
+          <option value="paper" selected>Paper</option>
+          <option value="live">Live</option>
+        {% else %}
+          <option value="paper">Paper</option>
+          <option value="live" selected>Live</option>
+        {% endif %}
+      </select>
 
-    <div class="tab-content mt-3">
+      <label for="trade_mode">Trade Mode:</label>
+      <select name="trade_mode" id="trade_mode">
+        {% if trade_mode == "test" %}
+          <option value="test" selected>Test</option>
+          <option value="real">Real</option>
+        {% else %}
+          <option value="test">Test</option>
+          <option value="real" selected>Real</option>
+        {% endif %}
+      </select>
 
-        <!-- Working Tab -->
-        <div class="tab-pane fade show active" id="working" role="tabpanel">
+      <button type="submit">Update</button>
+    </form>
 
-            <!-- Current Status -->
-            <h4>Current Status</h4>
-            <div class="card mb-3">
-                <div class="card-body">
-                    Account: -- | Take Profit: -- | Sell Type: -- <br>
-                    Market Status:
-                    {% if market_status == "OPEN" %}
-                        <span class="badge bg-success">OPEN</span>
-                    {% elif market_status == "CLOSED" %}
-                        <span class="badge bg-danger">CLOSED</span>
-                    {% else %}
-                        <span class="badge bg-warning">{{ market_status }}</span>
-                    {% endif %}
-                </div>
-            </div>
+    <p><strong>Current Account:</strong> {{ account_type|capitalize }}</p>
+    <p><strong>Trade Mode:</strong> {{ trade_mode|capitalize }}</p>
+  </div>
 
-            <!-- Account Selection -->
-            <h4>Account Selection</h4>
-            <div class="card mb-3">
-                <div class="card-body">
-                    Account TYPE (Select One ONLY):
-                    <div class="mt-2">
-                        <button class="btn btn-outline-primary btn-sm">Live</button>
-                        <button class="btn btn-outline-secondary btn-sm">Paper</button>
-                    </div>
-                </div>
-            </div>
+  <!-- Market Status -->
+  <div class="box">
+    <h2>Market Status</h2>
+    <p>{{ market_status }}</p>
+  </div>
 
-            <!-- Exit Criteria -->
-            <h4>Exit Criteria Settings</h4>
-            <div class="card mb-3">
-                <div class="card-body">
-                    Exit on Profit (Select One ONLY):
-                    <button class="btn btn-outline-success btn-sm">+25%</button>
-                    <button class="btn btn-outline-success btn-sm">+10%</button>
-                    <br><br>
-                    Sell TYPE (Select One ONLY):
-                    <button class="btn btn-outline-dark btn-sm">Market</button>
-                    <button class="btn btn-outline-dark btn-sm">Limit</button>
-                    <p class="mt-2"><small>(Stop loss handled by Pine Script)</small></p>
-                </div>
-            </div>
+  <!-- Signals Log -->
+  <div class="box">
+    <h2>Signals Log</h2>
+    {% if signals %}
+      <table>
+        <tr>
+          <th>Timestamp</th>
+          <th>Strategy</th>
+          <th>Ticker</th>
+          <th>Signal</th>
+        </tr>
+        {% for s in signals %}
+        <tr>
+          <td>{{ s.timestamp | prettytime }}</td>
+          <td>{{ s.strategy_id }}</td>
+          <td>{{ s.ticker }}</td>
+          <td>{{ s.signal }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p>No signals logged yet.</p>
+    {% endif %}
+  </div>
 
-            <!-- Trade Window -->
-            <h4>Trade Window</h4>
-            <table class="table table-bordered table-sm">
-                <thead>
-                    <tr>
-                        <th>Position</th>
-                        <th>Buy Price</th>
-                        <th>Current Price</th>
-                        <th>Qty</th>
-                        <th>+/- %</th>
-                        <th>+/- $</th>
-                        <th>Account Total</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                    </tr>
-                </tbody>
-            </table>
+  <!-- Trades Log -->
+  <div class="box">
+    <h2>Trades Log</h2>
+    {% if trades %}
+      <table>
+        <tr>
+          <th>Timestamp</th>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Status</th>
+        </tr>
+        {% for t in trades %}
+        <tr>
+          <td>{{ t.timestamp | prettytime }}</td>
+          <td>{{ t.symbol }}</td>
+          <td>{{ t.side }}</td>
+          <td>{{ t.qty }}</td>
+          <td class="{% if t.alpaca_status.status == 'success' %}success{% elif t.alpaca_status.status == 'error' %}error{% endif %}">
+            {{ t.alpaca_status.status }}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% else %}
+      <p>No trades logged yet.</p>
+    {% endif %}
+  </div>
 
-            <!-- Manual Trades -->
-            <h4>Manual Trades - Paper Only</h4>
-            <table class="table table-bordered table-sm">
-                <thead>
-                    <tr>
-                        <th>Action</th>
-                        <th>Ticker</th>
-                        <th>Qty</th>
-                        <th>Button</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Buy ETH/USD</td>
-                        <td>ETH/USD</td>
-                        <td>1</td>
-                        <td>
-                            <form action="/manual_trade" method="POST" style="display:inline;">
-                                <input type="hidden" name="symbol" value="ETH/USD">
-                                <input type="hidden" name="qty" value="1">
-                                <input type="hidden" name="side" value="buy">
-                                <button type="submit" class="btn btn-success btn-sm">BUY</button>
-                            </form>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Sell ETH/USD</td>
-                        <td>ETH/USD</td>
-                        <td>1</td>
-                        <td>
-                            <form action="/manual_trade" method="POST" style="display:inline;">
-                                <input type="hidden" name="symbol" value="ETH/USD">
-                                <input type="hidden" name="qty" value="1">
-                                <input type="hidden" name="side" value="sell">
-                                <button type="submit" class="btn btn-danger btn-sm">SELL</button>
-                            </form>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Buy SPY</td>
-                        <td>SPY</td>
-                        <td>1</td>
-                        <td>
-                            <form action="/manual_trade" method="POST" style="display:inline;">
-                                <input type="hidden" name="symbol" value="SPY">
-                                <input type="hidden" name="qty" value="1">
-                                <input type="hidden" name="side" value="buy">
-                                <button type="submit" class="btn btn-success btn-sm">BUY</button>
-                            </form>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Sell SPY</td>
-                        <td>SPY</td>
-                        <td>1</td>
-                        <td>
-                            <form action="/manual_trade" method="POST" style="display:inline;">
-                                <input type="hidden" name="symbol" value="SPY">
-                                <input type="hidden" name="qty" value="1">
-                                <input type="hidden" name="side" value="sell">
-                                <button type="submit" class="btn btn-danger btn-sm">SELL</button>
-                            </form>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-
-            <!-- Strategy Controls -->
-            <h4>Strategy Controls</h4>
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" id="strategyA">
-                <label class="form-check-label" for="strategyA">Strategy A</label>
-            </div>
-            <div class="form-check form-switch">
-                <input class="form-check-input" type="checkbox" id="strategyB">
-                <label class="form-check-label" for="strategyB">Strategy B</label>
-            </div>
-
-        </div>
-
-        <!-- Log Tab -->
-        <div class="tab-pane fade" id="log" role="tabpanel">
-            <h4>Signal Log</h4>
-            <table class="table table-bordered table-sm">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Source</th>
-                        <th>Symbol</th>
-                        <th>Side</th>
-                        <th>Qty</th>
-                        <th>Status</th>
-                        <th>Message / Details</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for signal in signals %}
-                        {% set status = signal.get('alpaca_status', {}).get('status', 'unknown') %}
-                        <tr class="{{ status }}">
-                            <td>{{ signal.timestamp|prettytime }}</td>
-                            <td>{{ signal.source }}</td>
-                            <td>{{ signal.symbol }}</td>
-                            <td>{{ signal.side }}</td>
-                            <td>{{ signal.qty }}</td>
-                            <td>{{ status }}</td>
-                            <td>
-                                {{ signal.get('alpaca_status', {}).get('message', 'N/A') }}
-                                {% if signal.get('alpaca_status', {}).get('raw') %}
-                                    <details>
-                                        <summary>Details</summary>
-                                        <pre>{{ signal.get('alpaca_status', {}).get('raw', {}) | tojson(indent=2) }}</pre>
-                                    </details>
-                                {% endif %}
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

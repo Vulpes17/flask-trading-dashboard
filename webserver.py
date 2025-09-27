@@ -71,14 +71,6 @@ def get_alpaca_keys():
             "https://api.alpaca.markets",
         )
 
-@app.route("/set_mode", methods=["POST"])
-def set_mode():
-    account_type = request.form.get("account_type", "paper").lower()
-    if account_type not in ["paper", "live"]:
-        account_type = "paper"
-    set_current_mode(account_type)
-    return redirect(url_for("dashboard"))
-
 
 # ================================
 # Filters & Routes
